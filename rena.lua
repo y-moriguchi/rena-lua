@@ -186,6 +186,43 @@ function Rena()
         end
     end
 
+    function me.range(codeStart, codeEnd)
+        return function(match, lastIndex, attr)
+            if lastIndex >= string.len(match) then
+                return nil
+            end
+            local codepoint = utf8.codepoint(match, lastIndex)
+            if codepoint >= codeStart and codepoint <= codeEnd then
+                local result = {}
+                result.match = utf8.char(codepoint)
+                result.lastIndex = utf8.offset(match, 2, lastIndex)
+                result.attr = attr
+                return result
+            else
+                return nil
+            end
+        end
+    end
+
+    function me.complement(exp)
+        return function(match, lastIndex, attr)
+            if lastIndex >= string.len(match) then
+                return nil
+            end
+            local ret = exp(match, lastIndex, attr)
+            if ret then
+                return nil
+            else
+                local codepoint = utf8.codepoint(match, lastIndex)
+                local result = {}
+                result.match = utf8.char(codepoint)
+                result.lastIndex = utf8.offset(match, 2, lastIndex)
+                result.attr = attr
+                return result
+            end
+        end
+    end
+
     function me.letrec(...)
         local args = {...}
         local function f(g) return g(g) end
