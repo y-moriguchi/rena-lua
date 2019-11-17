@@ -58,9 +58,10 @@ function Rena()
         end
     end
 
-    function me.times(minCount, maxCount, exp, action)
-        local action = action or function(match, syn, inh) return inh end
+    function me.times(minCount, maxCount, exp, execAction)
+        local action = execAction or function(match, syn, inh) return inh end
         local wrapped = me.wrap(exp)
+
         return function(match, lastIndex, attr)
             local indexNew = lastIndex
             local attrNew = attr
@@ -77,6 +78,7 @@ function Rena()
                     break
                 end
             end
+
             local result = {}
             result.match = string.sub(match, lastIndex, indexNew - 1)
             result.lastIndex = indexNew
@@ -105,8 +107,155 @@ function Rena()
         return me.times(0, 1, exp)
     end
 
-    function me.delimit(exp, delimiter, action)
-        local action = action or function(match, syn, inh) return inh end
+    function me.triesTimes(minCount, maxCount, exp, nextExp, execAction)
+        local action = execAction or function(match, syn, inh) return inh end
+        local wrapped = me.wrap(exp)
+        local nextWrapped = me.wrap(nextExp)
+
+        return function(match, lastIndex, execAction)
+            local stack = {}
+            local indexNew = lastIndex
+            local attrNew = attr
+            local count = 0
+            local ret
+            while minCount and count < minCount do
+                ret = wrapped(match, indexNew, attrNew)
+                if ret then
+                    indexNew = ret.lastIndex
+                    attrNew = action(ret.match, ret.attr, attrNew)
+                    count = count + 1
+                else
+                    return nil
+                end
+            end
+
+            while not maxCount or count < maxCount do
+                ret = wrapped(match, indexNew, attrNew)
+                if ret then
+                    stack[count] = ret
+                    indexNew = ret.lastIndex
+                    attrNew = action(ret.match, ret.attr, attrNew)
+                    stack[count].attr = attrNew
+                    count = count + 1
+                else
+                    break
+                end
+            end
+
+            while true do
+                ret = nextWrapped(match, indexNew, attrNew)
+                if ret then
+                    indexNew = ret.lastIndex
+                    attrNew = action(ret.match, ret.attr, attrNew)
+                    break
+                elseif count <= minCount then
+                    return nil
+                else
+                    count = count - 1
+                    indexNew = stack[count].lastIndex
+                    attrNew = stack[count].attr
+                end
+            end
+
+            local result = {}
+            result.match = string.sub(match, lastIndex, indexNew - 1)
+            result.lastIndex = indexNew
+            result.attr = attrNew
+            return result
+        end
+    end
+
+    function me.triesAtLeast(minCount, exp, action)
+        return me.triesTimes(minCount, nil, exp, action)
+    end
+
+    function me.triesAtMost(maxCount, exp, action)
+        return me.triesTimes(0, maxCount, exp, action)
+    end
+
+    function me.triesOneOrMore(exp, action)
+        return me.triesTimes(1, nil, exp, action)
+    end
+
+    function me.triesZeroOrMore(exp, action)
+        return me.triesTimes(0, nil, exp, action)
+    end
+
+    function me.triesMaybe(exp)
+        return me.triesTimes(0, 1, exp)
+    end
+
+    function me.triesTimesNonGreedy(minCount, maxCount, exp, nextExp, execAction)
+        local action = execAction or function(match, syn, inh) return inh end
+        local wrapped = me.wrap(exp)
+        local nextWrapped = me.wrap(nextExp)
+
+        return function(match, lastIndex, execAction)
+            local indexNew = lastIndex
+            local attrNew = attr
+            local count = 0
+            local ret
+            while minCount and count < minCount do
+                ret = wrapped(match, indexNew, attrNew)
+                if ret then
+                    indexNew = ret.lastIndex
+                    attrNew = action(ret.match, ret.attr, attrNew)
+                    count = count + 1
+                else
+                    return nil
+                end
+            end
+
+            while true do
+                ret = nextWrapped(match, indexNew, attrNew)
+                if ret then
+                    indexNew = ret.lastIndex
+                    attrNew = action(ret.match, ret.attr, attrNew)
+                    break
+                elseif maxCount and count >= maxCount then
+                    return nil
+                else
+                    ret = wrapped(match, indexNew, attrNew)
+                    if ret then
+                        indexNew = ret.lastIndex
+                        attrNew = action(ret.match, ret.attr, attrNew)
+                        count = count + 1
+                    else
+                        return nil
+                    end
+                end
+            end
+
+            local result = {}
+            result.match = string.sub(match, lastIndex, indexNew - 1)
+            result.lastIndex = indexNew
+            result.attr = attrNew
+            return result
+        end
+    end
+
+    function me.triesAtLeastNonGreedy(minCount, exp, action)
+        return me.triesTimesNonGreedy(minCount, nil, exp, action)
+    end
+
+    function me.triesAtMostNonGreedy(maxCount, exp, action)
+        return me.triesTimesNonGreedy(0, maxCount, exp, action)
+    end
+
+    function me.triesOneOrMoreNonGreedy(exp, action)
+        return me.triesTimesNonGreedy(1, nil, exp, action)
+    end
+
+    function me.triesZeroOrMoreNonGreedy(exp, action)
+        return me.triesTimesNonGreedy(0, nil, exp, action)
+    end
+
+    function me.triesMaybeNonGreedy(exp)
+        return me.triesTimesNonGreedy(0, 1, exp)
+    end
+
+    function me.delimit(exp, delimiter, execAction)
+        local action = execAction or function(match, syn, inh) return inh end
         local wrapped = me.wrap(exp)
         local wrappedDelimiter = me.wrap(delimiter)
         return function(match, lastIndex, attr)
