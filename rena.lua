@@ -317,6 +317,20 @@ function Rena()
         return lookahead(exp, false)
     end
 
+    function me.isStart()
+        return function(match, lastIndex, attr)
+            if lastIndex == 1 then
+                local result = {}
+                result.match = ''
+                result.lastIndex = lastIndex
+                result.attr = attr
+                return result
+            else
+                return nil
+            end
+        end
+    end
+
     function me.isEnd()
         return function(match, lastIndex, attr)
             if lastIndex > string.len(match) then
@@ -434,7 +448,7 @@ function Rena()
             local function actionAlter(match, syn, inh)
                 return me.choice(inh, syn)
             end
-            return me.con(con, me.zeroOrMore("|", con, actionAlter))
+            return me.con(con, me.zeroOrMore(me.con("|", con), actionAlter))
         end
 
         local function concat(init, alt, con, star, element)
@@ -457,6 +471,12 @@ function Rena()
                     return me.con(me.oneOrMore(inh.exp), syn)
                 elseif inh.star == "?+" then
                     return me.con(me.maybe(inh.exp), syn)
+                elseif inh.star == "}" then
+                    return me.triesTimes(inh.repeatStart, inh.repeatEnd, inh.exp, syn)
+                elseif inh.star == "}?" then
+                    return me.triesTimesNonGreedy(inh.repeatStart, inh.repeatEnd, inh.exp, syn)
+                elseif inh.star == "}+" then
+                    return me.con(me.times(inh.repeatStart, inh.repeatEnd, inh.exp), syn)
                 else
                     return me.con(inh.exp, syn)
                 end
@@ -468,33 +488,83 @@ function Rena()
             return me.con(star, me.choice(me.action(me.lookahead(me.choice("|", ")", me.isEnd())), actionEnd), me.action(con, actionCon)))
         end
 
+        local function createNaturalNumber()
+            local ch = me.range(0x30, 0x39)
+            local function actionNumber(match, syn, inh)
+                local matchNum = utf8.codepoint(match, 1) - 0x30
+                return inh * 10 + matchNum
+            end
+            return me.con(me.attr(0), me.oneOrMore(ch, actionNumber))
+        end
+        local naturalNumber = createNaturalNumber()
+
         local function rep(init, alt, con, star, element)
             local function actionStar(match, syn, inh)
-                local result = {}
-                result.star = match
-                result.exp = inh
-                return result
+                return {
+                    star = syn.star,
+                    repeatStart = syn.repeatStart,
+                    repeatEnd = syn.repeatEnd,
+                    exp = inh
+                }
             end
-            return me.con(element, me.action(me.choice("*?", "+?", "??", "*+", "++", "?+", "*", "+", "?", ""), actionStar))
+
+            local function actionRepeat(match, syn, inh)
+                return {
+                    repeatStart = inh,
+                    repeatEnd = syn,
+                }
+            end
+
+            local function actionAtLeast(match, syn, inh)
+                return {
+                    repeatStart = syn,
+                    repeatEnd = nil,
+                }
+            end
+
+            local function actionTimes(match, syn, inh)
+                return {
+                    repeatStart = syn,
+                    repeatEnd = syn,
+                }
+            end
+
+            local function actionSpecifier(match, syn, inh)
+                return {
+                    star = match,
+                    repeatStart = inh.repeatStart,
+                    repeatEnd = inh.repeatEnd
+                }
+            end
+
+            local function actionRepeatStar(match, syn, inh)
+                return {
+                    star = match
+                }
+            end
+
+            local specifier = me.action(me.choice("}?", "}+", "}"), actionSpecifier)
+            local rep = me.con("{", naturalNumber, ",", me.action(naturalNumber, actionRepeat), specifier)
+            local atLeast = me.con("{", me.action(naturalNumber, actionAtLeast), ",", specifier)
+            local times = me.con("{", me.action(naturalNumber, actionTimes), specifier)
+            local star = me.action(me.choice("*?", "+?", "??", "*+", "++", "?+", "*", "+", "?", ""), actionRepeatStar)
+            local reps = me.choice(rep, atLeast, times, star)
+            return me.con(element, me.action(reps, actionStar))
         end
 
         local function element(init, alt, con, star, element)
-            local function actionMatch(match, syn, inh)
-                return match
-            end
-
             local function actionChar(match, syn, inh)
-                return me.wrap(match)
+                return me.wrap(syn)
             end
 
             local function actionRange(match, syn, inh)
                 local codeStart = utf8.codepoint(inh, 1)
-                local codeEnd = utf8.codepoint(match, 1)
+                local codeEnd = utf8.codepoint(syn, 1)
                 return me.range(codeStart, codeEnd)
             end
 
             local function actionCh1(match, syn, inh)
-                return me.wrap(match)
+                return me.wrap(syn)
             end
 
             local function actionChElems(match, syn, inh)
@@ -521,18 +591,24 @@ function Rena()
                 return me.action(syn, innerAction)
             end
 
+            local function actionHexDigit(match, syn, inh)
+                local codepoint = tonumber(match, 16)
+                return utf8.char(codepoint)
+            end
+
             local function actionRefer(match, syn, inh)
                 local function matchCapture(matchInner, lastIndex, attr)
                     local num = utf8.codepoint(match, 1) - 0x30
-                    print(attr)
-                    print(match)
-                    print(attr[num])
                     if attr[num] == nil then
                         error("uncaputured number")
                     end
                     return matchString(attr[num], matchInner, lastIndex, attr)
                 end
                 return matchCapture
+            end
+
+            local function actionAny(match, syn, inh)
+                return me.wrap(match)
             end
 
             local function actionLookahead(match, syn, inh)
@@ -543,14 +619,34 @@ function Rena()
                 return me.lookaheadNot(syn)
             end
 
+            local escExpChar1 = {
+                n = "\n",
+                r = "\r",
+                t = "\t"
+            }
+            escExpChar1["\\"] = me.wrap("\\")
+            local function matchEscChar1(match, lastIndex, attr)
+                local escCh = string.sub(match, lastIndex, lastIndex)
+                local escResult = escExpChar1[escCh]
+                if escResult == nil then
+                    return nil
+                else
+                    return {
+                        match = escCh,
+                        lastIndex = lastIndex + 1,
+                        attr = escResult
+                    }
+                end
+            end
+            local otherChar = me.action(me.range(0, 0xffff), function(match, syn, inh) return match end)
+            local hexDigit = me.choice(me.range(0x30, 0x39), me.range(0x41, 0x46), me.range(0x61, 0x66))
+            local hexUnicode = me.con("u", me.action(me.con(hexDigit, hexDigit, hexDigit, hexDigit), actionHexDigit))
+            local anyChar = me.choice(me.con("\\", me.choice(matchEscChar1, hexUnicode, otherChar)), otherChar)
+
             local escExp = {
-                n = me.wrap("\n"),
-                r = me.wrap("\r"),
-                t = me.wrap("\t"),
                 d = me.range(0x30, 0x39),
                 D = me.con(me.lookaheadNot(me.range(0x30, 0x39)), me.range(0, 0xffff))
             }
-            escExp["\\"] = me.wrap("\\")
             local function matchEsc(match, lastIndex, attr)
                 local escCh = string.sub(match, lastIndex, lastIndex)
                 local escResult = escExp[escCh]
@@ -573,14 +669,16 @@ function Rena()
             local capture = me.action(me.con("(", alt, ")"), actionCapture)
             local paren = me.choice(me.con("(?:", alt, ")"), lookahead, lookaheadNot, capture)
 
-            local chchset = me.con(me.lookaheadNot("]"), me.range(0, 0xffff))
-            local chrange = me.con(me.action(chchset, actionMatch), "-", me.action(chchset, actionRange))
+            local chchset = me.con(me.lookaheadNot("]"), anyChar)
+            local chrange = me.con(chchset, "-", me.action(chchset, actionRange))
             local ch1 = me.action(chchset, actionCh1)
             local chelem = me.choice(chrange, ch1)
             local chelems = me.con(me.attr(nil), me.oneOrMore(chelem, actionChElems))
             local chcmpset = me.con("[^", me.action(chelems, actionChCmp), "]")
             local chset = me.con("[", chelems, "]")
-            local elem = me.choice(chcmpset, chset, paren, backslash, me.action(me.range(0, 0xffff), actionChar))
+            local anchorStart = me.action("^", function(match, syn, inh) return me.isStart() end)
+            local anchorEnd = me.action("$", function(match, syn, inh) return me.isEnd() end)
+            local elem = me.choice(chcmpset, chset, paren, backslash, anchorStart, anchorEnd, me.action(anyChar, actionChar))
             return me.con(me.lookaheadNot("|", ")"), elem)
         end
 
