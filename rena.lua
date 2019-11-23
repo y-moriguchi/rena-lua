@@ -697,6 +697,68 @@ function Rena()
         end
     end
 
+    local function matchPos(matcher, dest, position)
+        while position <= string.len(dest) do
+            local result = matcher(dest, position, nil)
+            if result then
+                result.attr[0] = result.match
+                result.attr.lastIndex = result.lastIndex - 1
+                result.attr.index = position
+                return result.attr
+            else
+                position = position + 1
+            end
+        end
+        return nil
+    end
+
+    function me.global(pattern)
+        local matcher = me.regex(pattern)
+
+        local function matchFirst(dest)
+            local position = 1
+            local function matchNext()
+                local result = matchPos(matcher, dest, position)
+                if result then
+                    position = result.lastIndex
+                end
+                return result
+            end
+            return matchNext
+        end
+        return matchFirst
+    end
+
+    function me.matcher(pattern)
+        local matcher = me.regex(pattern)
+
+        local function matchFirst(dest)
+            return matchPos(matcher, dest, 1)
+        end
+        return matchFirst
+    end
+
+    function me.split(pattern)
+        local matcher = me.global(pattern)
+
+        local function splitString(dest)
+            local matchNext = matcher(dest)
+            local splitted = {}
+            local indexBefore = 1
+            while true do
+                local result = matchNext()
+                if result then
+                    table.insert(splitted, string.sub(dest, indexBefore, result.index - 1))
+                else
+                    table.insert(splitted, string.sub(dest, indexBefore, string.len(dest)))
+                    return splitted
+                end
+                indexBefore = result.lastIndex + 1
+            end
+        end
+        return splitString
+    end
+
     return me
 end
 
