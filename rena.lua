@@ -62,6 +62,18 @@ function Rena()
         end
     end
 
+    function me.choiceSelect(selector, ...)
+        local args = {...}
+        return function(match, lastIndex, attr)
+            local results = {}
+            for i = 1, #args do
+                local ret = (me.wrap(args[i]))(match, lastIndex, attr)
+                table.insert(results, ret)
+            end
+            return selector(table.unpack(results))
+        end
+    end
+
     function me.times(minCount, maxCount, exp, execAction)
         local action = execAction or function(match, syn, inh) return inh end
         local wrapped = me.wrap(exp)
@@ -436,7 +448,7 @@ function Rena()
         return (f(h))[1]
     end
 
-    local function createRegexParser()
+    local function createRegexParser(flags)
         local function init(init, alt, con, star, element)
             local function actionInit(match, syn, inh)
                 return me.con(me.attr({}), syn)
@@ -445,8 +457,26 @@ function Rena()
         end
 
         local function alter(init, alt, con, star, element)
+            local function selector(arg1, arg2)
+                if not arg1 and not arg2 then
+                    return nil
+                elseif not arg1 then
+                    return arg2
+                elseif not arg2 then
+                    return arg1
+                elseif arg1.lastIndex < arg2.lastIndex then
+                    return arg2
+                else
+                    return arg1
+                end
+            end
+
             local function actionAlter(match, syn, inh)
-                return me.choice(inh, syn)
+                if flags == "M" then
+                    return me.choiceSelect(selector, inh, syn)
+                else
+                    return me.choice(inh, syn)
+                end
             end
             return me.con(con, me.zeroOrMore(me.con("|", con), actionAlter))
         end
@@ -687,9 +717,15 @@ function Rena()
     end
 
     local regexParser = createRegexParser()
+    local regexParserMax = createRegexParser("M")
 
-    function me.regex(pattern)
-        local result = regexParser(pattern, 1, nil)
+    function me.regex(pattern, flags)
+        local result
+        if flags == "M" then
+            result = regexParserMax(pattern, 1, nil)
+        else
+            result = regexParser(pattern, 1, nil)
+        end
         if result then
             return result.attr
         else
@@ -712,8 +748,8 @@ function Rena()
         return nil
     end
 
-    function me.global(pattern)
-        local matcher = me.regex(pattern)
+    function me.global(pattern, flags)
+        local matcher = me.regex(pattern, flags)
 
         local function matchFirst(dest)
             local position = 1
@@ -729,8 +765,8 @@ function Rena()
         return matchFirst
     end
 
-    function me.matcher(pattern)
-        local matcher = me.regex(pattern)
+    function me.matcher(pattern, flags)
+        local matcher = me.regex(pattern, flags)
 
         local function matchFirst(dest)
             return matchPos(matcher, dest, 1)
@@ -738,8 +774,8 @@ function Rena()
         return matchFirst
     end
 
-    function me.split(pattern)
-        local matcher = me.global(pattern)
+    function me.split(pattern, flags)
+        local matcher = me.global(pattern, flags)
 
         local function splitString(dest)
             local matchNext = matcher(dest)
