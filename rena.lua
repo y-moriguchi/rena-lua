@@ -1,6 +1,24 @@
 function Rena(option)
     local me = {}
 
+    local skip = nil
+    if option and option.ignore then
+        skip = option.ignore
+    end
+
+    local function skipSpace(match, index)
+        if skip then
+            local ret = skip(match, index, nil)
+            if ret then
+                return ret.lastIndex
+            else
+                return index
+            end
+        else
+            return index
+        end
+    end
+
     local function matchString(obj, match, lastIndex, attr)
         if lastIndex + string.len(obj) - 1 > string.len(match) then
             return nil
@@ -35,7 +53,7 @@ function Rena(option)
             for i = 1, #args do
                 local ret = (me.wrap(args[i]))(match, indexNew, attrNew)
                 if ret then
-                    indexNew = ret.lastIndex
+                    indexNew = skipSpace(match, ret.lastIndex)
                     attrNew = ret.attr
                 else
                     return nil
@@ -85,7 +103,7 @@ function Rena(option)
             while not maxCount or count < maxCount do
                 local ret = wrapped(match, indexNew, attrNew)
                 if ret then
-                    indexNew = ret.lastIndex
+                    indexNew = skipSpace(match, ret.lastIndex)
                     attrNew = action(ret.match, ret.attr, attrNew)
                     count = count + 1
                 elseif count < minCount then
@@ -138,7 +156,7 @@ function Rena(option)
             while minCount and count < minCount do
                 ret = wrapped(match, indexNew, attrNew)
                 if ret then
-                    indexNew = ret.lastIndex
+                    indexNew = skipSpace(match, ret.lastIndex)
                     attrNew = action(ret.match, ret.attr, attrNew)
                     count = count + 1
                 else
@@ -152,7 +170,7 @@ function Rena(option)
                 stack[count].attr = attrNew
                 ret = wrapped(match, indexNew, attrNew)
                 if ret then
-                    indexNew = ret.lastIndex
+                    indexNew = skipSpace(match, ret.lastIndex)
                     attrNew = action(ret.match, ret.attr, attrNew)
                     count = count + 1
                 else
@@ -163,7 +181,7 @@ function Rena(option)
             while true do
                 ret = nextWrapped(match, indexNew, attrNew)
                 if ret then
-                    indexNew = ret.lastIndex
+                    indexNew = skipSpace(match, ret.lastIndex)
                     attrNew = action(ret.match, ret.attr, attrNew)
                     break
                 elseif count < minCount then
@@ -216,7 +234,7 @@ function Rena(option)
             while minCount and count < minCount do
                 ret = wrapped(match, indexNew, attrNew)
                 if ret then
-                    indexNew = ret.lastIndex
+                    indexNew = skipSpace(match, ret.lastIndex)
                     attrNew = action(ret.match, ret.attr, attrNew)
                     count = count + 1
                 else
@@ -227,7 +245,7 @@ function Rena(option)
             while true do
                 ret = nextWrapped(match, indexNew, attrNew)
                 if ret then
-                    indexNew = ret.lastIndex
+                    indexNew = skipSpace(match, ret.lastIndex)
                     attrNew = action(ret.match, ret.attr, attrNew)
                     break
                 elseif maxCount and count >= maxCount then
@@ -235,7 +253,7 @@ function Rena(option)
                 else
                     ret = wrapped(match, indexNew, attrNew)
                     if ret then
-                        indexNew = ret.lastIndex
+                        indexNew = skipSpace(match, ret.lastIndex)
                         attrNew = action(ret.match, ret.attr, attrNew)
                         count = count + 1
                     else
