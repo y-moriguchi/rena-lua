@@ -1,24 +1,6 @@
 function Rena(option)
     local me = {}
 
-    local skip = nil
-    if option and option.ignore then
-        skip = option.ignore
-    end
-
-    local function skipSpace(match, index)
-        if skip then
-            local ret = skip(match, index, nil)
-            if ret then
-                return ret.lastIndex
-            else
-                return index
-            end
-        else
-            return index
-        end
-    end
-
     local function matchString(obj, match, lastIndex, attr)
         if lastIndex + string.len(obj) - 1 > string.len(match) then
             return nil
@@ -42,6 +24,24 @@ function Rena(option)
             end
         else
             return obj
+        end
+    end
+
+    local skip = nil
+    if option and option.ignore then
+        skip = me.wrap(option.ignore)
+    end
+
+    local function skipSpace(match, index)
+        if skip then
+            local ret = skip(match, index, nil)
+            if ret then
+                return ret.lastIndex
+            else
+                return index
+            end
+        else
+            return index
         end
     end
 
@@ -470,10 +470,10 @@ function Rena(option)
             if #lst > 0 then
                 return me.con(me.lookaheadNot(me.choice(table.unpack(lst))), key)
             else
-                return me.wrap
+                return me.wrap(key)
             end
         else
-            return me.wrap
+            return me.wrap(key)
         end
     end
 
@@ -482,6 +482,18 @@ function Rena(option)
             return me.lookaheadNot(me.choice(table.unpack(keys)))
         else
             return me.lookaheadNot(me.con())
+        end
+    end
+
+    function me.equalsId(id)
+        if not keys and not skip then
+            return me.wrap(id)
+        elseif keys and not skip then
+            return me.con(id, me.choice(me.isEnd(), me.lookahead(me.choice(table.unpack(keys)))))
+        elseif not keys and skip then
+            return me.con(id, me.choice(me.isEnd(), me.lookahead(skip)))
+        else
+            return me.con(id, me.choice(me.isEnd(), me.lookahead(skip), me.lookahead(me.choice(table.unpack(keys)))))
         end
     end
 
