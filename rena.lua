@@ -1,6 +1,14 @@
 function Rena(option)
     local me = {}
 
+    local regexObject = nil
+    local function getRegex()
+        if not regexObject then
+            regexObject = Regex()
+        end
+        return regexObject
+    end
+
     local function matchString(obj, match, lastIndex, attr)
         if lastIndex + string.len(obj) - 1 > string.len(match) then
             return nil
@@ -67,6 +75,38 @@ function Rena(option)
         end
     end
 
+    function me.conAction(...)
+        local args = {...}
+        if #args < 1 then
+            error("argument must be at least 1");
+        end
+
+        local action = args[#args]
+        return function(match, lastindex, attr)
+            local attrs = {}
+            local matched = {
+                match = "",
+                lastIndex = lastindex,
+                attr = attr
+            }
+            for i = 1, #args - 1 do
+                local wrapped = me.wrap(args[i]);
+                matched = wrapped(match, matched.lastIndex, matched.attr)
+                if not matched then
+                    return nil
+                end
+                attrs[i] = matched.attr
+                matched.lastIndex = skipSpace(match, matched.lastIndex)
+            end
+            attrs[#args] = attr
+            return {
+                match = string.sub(match, lastindex, matched.lastIndex - 1),
+                lastIndex = matched.lastIndex,
+                attr = action(table.unpack(attrs))
+            }
+        end
+    end
+
     function me.choice(...)
         local args = {...}
         return function(match, lastIndex, attr)
@@ -80,11 +120,16 @@ function Rena(option)
         end
     end
 
-    function me.choiceSelect(selector, ...)
+    function me.choiceSelect(...)
         local args = {...}
+        if #args < 1 then
+            error("argument must be at least 1");
+        end
+
+        local selector = args[#args]
         return function(match, lastIndex, attr)
             local results = {}
-            for i = 1, #args do
+            for i = 1, #args - 1 do
                 local ret = (me.wrap(args[i]))(match, lastIndex, attr)
                 table.insert(results, ret)
             end
@@ -93,7 +138,7 @@ function Rena(option)
     end
 
     function me.times(minCount, maxCount, exp, execAction)
-        local action = execAction or function(match, syn, inh) return inh end
+        local action = execAction or function(match, syn, inh) return syn end
         local wrapped = me.wrap(exp)
 
         return function(match, lastIndex, attr)
@@ -142,7 +187,7 @@ function Rena(option)
     end
 
     function me.triesTimes(minCount, maxCount, exp, nextExp, execAction)
-        local action = execAction or function(match, syn, inh) return inh end
+        local action = execAction or function(match, syn, inh) return syn end
         local wrapped = me.wrap(exp)
         local nextWrapped = me.wrap(nextExp)
 
@@ -164,15 +209,18 @@ function Rena(option)
                 end
             end
 
+            stack[count] = {}
+            stack[count].lastIndex = indexNew
+            stack[count].attr = attrNew
             while not maxCount or count < maxCount do
-                stack[count] = {}
-                stack[count].lastIndex = indexNew
-                stack[count].attr = attrNew
                 ret = wrapped(match, indexNew, attrNew)
                 if ret then
                     indexNew = skipSpace(match, ret.lastIndex)
-                    attrNew = action(ret.match, ret.attr, attrNew)
                     count = count + 1
+                    stack[count] = {}
+                    stack[count].lastIndex = indexNew
+                    stack[count].attr = ret.attr
+                    attrNew = action(ret.match, ret.attr, attrNew)
                 else
                     break
                 end
@@ -222,11 +270,11 @@ function Rena(option)
     end
 
     function me.triesTimesNonGreedy(minCount, maxCount, exp, nextExp, execAction)
-        local action = execAction or function(match, syn, inh) return inh end
+        local action = execAction or function(match, syn, inh) return syn end
         local wrapped = me.wrap(exp)
         local nextWrapped = me.wrap(nextExp)
 
-        return function(match, lastIndex, execAction)
+        return function(match, lastIndex, attr)
             local indexNew = lastIndex
             local attrNew = attr
             local count = 0
@@ -246,7 +294,7 @@ function Rena(option)
                 ret = nextWrapped(match, indexNew, attrNew)
                 if ret then
                     indexNew = skipSpace(match, ret.lastIndex)
-                    attrNew = action(ret.match, ret.attr, attrNew)
+                    attrNew = ret.attr
                     break
                 elseif maxCount and count >= maxCount then
                     return nil
@@ -291,7 +339,7 @@ function Rena(option)
     end
 
     function me.delimit(exp, delimiter, execAction)
-        local action = execAction or function(match, syn, inh) return inh end
+        local action = execAction or function(match, syn, inh) return syn end
         local wrapped = me.wrap(exp)
         local wrappedDelimiter = me.wrap(delimiter)
         return me.con(me.action(wrapped, action), me.zeroOrMore(me.con(wrappedDelimiter, me.action(wrapped, action))))
@@ -395,32 +443,14 @@ function Rena(option)
             end
             local codepoint = utf8.codepoint(match, lastIndex)
             if codepoint >= codeStart and codepoint <= codeEnd then
+                local chutf8 = utf8.char(codepoint)
                 local result = {}
-                result.match = utf8.char(codepoint)
-                result.lastIndex = utf8.offset(match, lastIndex) + 1
+                result.match = chutf8
+                result.lastIndex = lastIndex + string.len(chutf8)
                 result.attr = attr
                 return result
             else
                 return nil
-            end
-        end
-    end
-
-    function me.complement(exp)
-        return function(match, lastIndex, attr)
-            if lastIndex > string.len(match) then
-                return nil
-            end
-            local ret = exp(match, lastIndex, attr)
-            if ret then
-                return nil
-            else
-                local codepoint = utf8.codepoint(match, lastIndex)
-                local result = {}
-                result.match = utf8.char(codepoint)
-                result.lastIndex = utf8.offset(match, lastIndex) + 1
-                result.attr = attr
-                return result
             end
         end
     end
@@ -497,6 +527,40 @@ function Rena(option)
         end
     end
 
+
+    local patternFloatString = "[\\+\\-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][\\+\\-]?[0-9]+)?"
+    local patternFloat = nil
+    local function getPatternFloat()
+        if not patternFloat then
+            patternFloat = getRegex().regex(patternFloatString)
+        end
+        return patternFloat
+    end
+
+    function me.real()
+        return function(match, lastIndex, attr)
+            local ptn = getPatternFloat()
+            local result = ptn(match, lastIndex, attr)
+            if result then
+                return {
+                    match = result.match,
+                    lastIndex = result.lastIndex,
+                    attr = tonumber(result.match)
+                }
+            else
+                return nil
+            end
+        end
+    end
+
+    local patternBr = nil
+    function me.br()
+        if not patternBr then
+            patternBr = getRegex().regex("\\r\\n|\\r|\\n")
+        end
+        return patternBr
+    end
+
     return me
 end
 
@@ -529,7 +593,7 @@ function Regex()
 
             local function actionAlter(match, syn, inh)
                 if flags == "M" then
-                    return re.choiceSelect(selector, inh, syn)
+                    return re.choiceSelect(inh, syn, selector)
                 else
                     return re.choice(inh, syn)
                 end
@@ -764,7 +828,8 @@ function Regex()
             local chset = re.con("[", chelems, "]")
             local anchorStart = re.action("^", function(match, syn, inh) return re.isStart() end)
             local anchorEnd = re.action("$", function(match, syn, inh) return re.isEnd() end)
-            local elem = re.choice(chcmpset, chset, paren, backslash, anchorStart, anchorEnd, re.action(anyChar, actionChar))
+            local dot = re.action(".", function(match, syn, inh) return re.con(re.lookaheadNot(re.choice("\r", "\n")), re.range(0, 0xffff)) end)
+            local elem = re.choice(chcmpset, chset, paren, backslash, anchorStart, anchorEnd, dot, re.action(anyChar, actionChar))
             return re.con(re.lookaheadNot("|", ")"), elem)
         end
 
