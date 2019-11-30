@@ -1,4 +1,4 @@
-function Rena()
+function Rena(option)
     local me = {}
 
     local function matchString(obj, match, lastIndex, attr)
@@ -446,6 +446,51 @@ function Rena()
             return res
         end
         return (f(h))[1]
+    end
+
+    local keys = nil
+    local keysBin = {}
+    local keysBinMax = 0
+    if option and option.keys then
+        keys = option.keys
+        for i = 1, #keys do
+            local klen = string.len(keys[i])
+            if keysBin[klen] == nil then
+                keysBin[klen] = {}
+            end
+            table.insert(keysBin[klen], keys[i])
+            if keysBinMax < klen then
+                keysBinMax = klen
+            end
+        end
+    end
+
+    function me.key(key)
+        if keys then
+            local lst = {}
+            for i = string.len(key) + 1, keysBinMax do
+                for j = 1, #(keysBin[i]) do
+                    if key == string.sub(keysBin[i][j], 1, string.len(key)) then
+                        table.insert(lst, keysBin[i][j])
+                    end
+                end
+            end
+            if #lst > 0 then
+                return me.con(me.lookaheadNot(me.choice(table.unpack(lst))), key)
+            else
+                return me.wrap
+            end
+        else
+            return me.wrap
+        end
+    end
+
+    function me.notKey()
+        if keys then
+            return me.lookaheadNot(me.choice(table.unpack(keys)))
+        else
+            return me.lookaheadNot(me.con())
+        end
     end
 
     return me
