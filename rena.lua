@@ -276,33 +276,7 @@ function Rena(option)
         local action = execAction or function(match, syn, inh) return inh end
         local wrapped = me.wrap(exp)
         local wrappedDelimiter = me.wrap(delimiter)
-        return function(match, lastIndex, attr)
-            local indexNew = lastIndex
-            local attrNew = attr
-            local indexLoop = lastIndex
-            while true do
-                local ret = wrapped(match, indexLoop, attrNew)
-                if ret then
-                    indexNew = ret.lastIndex
-                    attrNew = action(ret.match, ret.attr, attrNew)
-                    local retDelimiter = wrappedDelimiter(match, indexNew, attrNew)
-                    if retDelimiter then
-                        indexLoop = retDelimiter.lastIndex
-                    else
-                        break
-                    end
-                elseif indexNew == lastIndex then
-                    return nil
-                else
-                    break
-                end
-            end
-            local result = {}
-            result.match = string.sub(match, lastIndex, indexNew - 1)
-            result.lastIndex = indexNew
-            result.attr = attrNew
-            return result
-        end
+        return me.con(me.action(wrapped, action), me.zeroOrMore(me.con(wrappedDelimiter, me.action(wrapped, action))))
     end
 
     local function lookahead(exp, signum)
