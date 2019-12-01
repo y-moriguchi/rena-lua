@@ -4,7 +4,7 @@ function Rena(option)
     local regexObject = nil
     local function getRegex()
         if not regexObject then
-            regexObject = Regex()
+            regexObject = Regex(me)
         end
         return regexObject
     end
@@ -561,359 +561,302 @@ function Rena(option)
         return patternBr
     end
 
-    return me
-end
+    function Regex(re)
+        local me = {}
 
-function Regex()
-    local me = {}
-    local re = Rena()
-
-    local function createRegexParser(flags)
-        local function init(init, alt, con, star, element)
-            local function actionInit(match, syn, inh)
-                return re.con(re.attr({}), syn)
-            end
-            return re.action(alt, actionInit)
-        end
-
-        local function alter(init, alt, con, star, element)
-            local function selector(arg1, arg2)
-                if not arg1 and not arg2 then
-                    return nil
-                elseif not arg1 then
-                    return arg2
-                elseif not arg2 then
-                    return arg1
-                elseif arg1.lastIndex < arg2.lastIndex then
-                    return arg2
-                else
-                    return arg1
+        local function createRegexParser(flags)
+            local function init(init, alt, con, star, element)
+                local function actionInit(match, syn, inh)
+                    return re.con(re.attr({}), syn)
                 end
+                return re.action(alt, actionInit)
             end
 
-            local function actionAlter(match, syn, inh)
-                if flags == "M" then
-                    return re.choiceSelect(inh, syn, selector)
-                else
-                    return re.choice(inh, syn)
-                end
-            end
-            return re.con(con, re.zeroOrMore(re.con("|", con), actionAlter))
-        end
-
-        local function concat(init, alt, con, star, element)
-            local function actionCon(match, syn, inh)
-                if inh.star == "*" then
-                    return re.triesZeroOrMore(inh.exp, syn)
-                elseif inh.star == "+" then
-                    return re.triesOneOrMore(inh.exp, syn)
-                elseif inh.star == "?" then
-                    return re.triesMaybe(inh.exp, syn)
-                elseif inh.star == "*?" then
-                    return re.triesZeroOrMoreNonGreedy(inh.exp, syn)
-                elseif inh.star == "+?" then
-                    return re.triesOneOrMoreNonGreedy(inh.exp, syn)
-                elseif inh.star == "??" then
-                    return re.triesMaybeNonGreedy(inh.exp, syn)
-                elseif inh.star == "*+" then
-                    return re.con(re.zeroOrMore(inh.exp), syn)
-                elseif inh.star == "++" then
-                    return re.con(re.oneOrMore(inh.exp), syn)
-                elseif inh.star == "?+" then
-                    return re.con(re.maybe(inh.exp), syn)
-                elseif inh.star == "}" then
-                    return re.triesTimes(inh.repeatStart, inh.repeatEnd, inh.exp, syn)
-                elseif inh.star == "}?" then
-                    return re.triesTimesNonGreedy(inh.repeatStart, inh.repeatEnd, inh.exp, syn)
-                elseif inh.star == "}+" then
-                    return re.con(re.times(inh.repeatStart, inh.repeatEnd, inh.exp), syn)
-                else
-                    return re.con(inh.exp, syn)
-                end
-            end
-
-            local function actionEnd(match, syn, inh)
-                return actionCon(match, "", inh)
-            end
-            return re.con(star, re.choice(re.action(re.lookahead(re.choice("|", ")", re.isEnd())), actionEnd), re.action(con, actionCon)))
-        end
-
-        local function createNaturalNumber()
-            local ch = re.range(0x30, 0x39)
-            local function actionNumber(match, syn, inh)
-                local matchNum = utf8.codepoint(match, 1) - 0x30
-                return inh * 10 + matchNum
-            end
-            return re.con(re.attr(0), re.oneOrMore(ch, actionNumber))
-        end
-        local naturalNumber = createNaturalNumber()
-
-        local function rep(init, alt, con, star, element)
-            local function actionStar(match, syn, inh)
-                return {
-                    star = syn.star,
-                    repeatStart = syn.repeatStart,
-                    repeatEnd = syn.repeatEnd,
-                    exp = inh
-                }
-            end
-
-            local function actionRepeat(match, syn, inh)
-                return {
-                    repeatStart = inh,
-                    repeatEnd = syn,
-                }
-            end
-
-            local function actionAtLeast(match, syn, inh)
-                return {
-                    repeatStart = syn,
-                    repeatEnd = nil,
-                }
-            end
-
-            local function actionTimes(match, syn, inh)
-                return {
-                    repeatStart = syn,
-                    repeatEnd = syn,
-                }
-            end
-
-            local function actionSpecifier(match, syn, inh)
-                return {
-                    star = match,
-                    repeatStart = inh.repeatStart,
-                    repeatEnd = inh.repeatEnd
-                }
-            end
-
-            local function actionRepeatStar(match, syn, inh)
-                return {
-                    star = match
-                }
-            end
-
-            local specifier = re.action(re.choice("}?", "}+", "}"), actionSpecifier)
-            local rep = re.con("{", naturalNumber, ",", re.action(naturalNumber, actionRepeat), specifier)
-            local atLeast = re.con("{", re.action(naturalNumber, actionAtLeast), ",", specifier)
-            local times = re.con("{", re.action(naturalNumber, actionTimes), specifier)
-            local star = re.action(re.choice("*?", "+?", "??", "*+", "++", "?+", "*", "+", "?", ""), actionRepeatStar)
-            local reps = re.choice(rep, atLeast, times, star)
-            return re.con(element, re.action(reps, actionStar))
-        end
-
-        local function element(init, alt, con, star, element)
-            local function actionChar(match, syn, inh)
-                return re.wrap(syn)
-            end
-
-            local function actionRange(match, syn, inh)
-                local codeStart = utf8.codepoint(inh, 1)
-                local codeEnd = utf8.codepoint(syn, 1)
-                return re.range(codeStart, codeEnd)
-            end
-
-            local function actionCh1(match, syn, inh)
-                return re.wrap(syn)
-            end
-
-            local function actionChElems(match, syn, inh)
-                if inh == nil then
-                    return syn
-                else
-                    return re.choice(inh, syn)
-                end
-            end
-
-            local function actionChCmp(match, syn, inh)
-                return re.con(re.lookaheadNot(syn), re.range(0, 0xffff))
-            end
-
-            local function actionCapture(match, syn, inh)
-                local function innerAction(match, syn, inh)
-                    local copy = {}
-                    for key, value in pairs(syn) do
-                        copy[key] = value
+            local function alter(init, alt, con, star, element)
+                local function selector(arg1, arg2)
+                    if not arg1 and not arg2 then
+                        return nil
+                    elseif not arg1 then
+                        return arg2
+                    elseif not arg2 then
+                        return arg1
+                    elseif arg1.lastIndex < arg2.lastIndex then
+                        return arg2
+                    else
+                        return arg1
                     end
-                    table.insert(copy, match)
-                    return copy
                 end
-                return re.action(syn, innerAction)
-            end
 
-            local function actionHexDigit(match, syn, inh)
-                local codepoint = tonumber(match, 16)
-                return utf8.char(codepoint)
-            end
-
-            local function actionRefer(match, syn, inh)
-                local function matchCapture(matchInner, lastIndex, attr)
-                    local num = utf8.codepoint(match, 1) - 0x30
-                    if attr[num] == nil then
-                        error("uncaputured number")
+                local function actionAlter(match, syn, inh)
+                    if flags == "M" then
+                        return re.choiceSelect(inh, syn, selector)
+                    else
+                        return re.choice(inh, syn)
                     end
-                    return matchString(attr[num], matchInner, lastIndex, attr)
                 end
-                return matchCapture
+                return re.con(con, re.zeroOrMore(re.con("|", con), actionAlter))
             end
 
-            local function actionAny(match, syn, inh)
-                return re.wrap(match)
+            local function concat(init, alt, con, star, element)
+                local function actionCon(match, syn, inh)
+                    if inh.star == "*" then
+                        return re.triesZeroOrMore(inh.exp, syn)
+                    elseif inh.star == "+" then
+                        return re.triesOneOrMore(inh.exp, syn)
+                    elseif inh.star == "?" then
+                        return re.triesMaybe(inh.exp, syn)
+                    elseif inh.star == "*?" then
+                        return re.triesZeroOrMoreNonGreedy(inh.exp, syn)
+                    elseif inh.star == "+?" then
+                        return re.triesOneOrMoreNonGreedy(inh.exp, syn)
+                    elseif inh.star == "??" then
+                        return re.triesMaybeNonGreedy(inh.exp, syn)
+                    elseif inh.star == "*+" then
+                        return re.con(re.zeroOrMore(inh.exp), syn)
+                    elseif inh.star == "++" then
+                        return re.con(re.oneOrMore(inh.exp), syn)
+                    elseif inh.star == "?+" then
+                        return re.con(re.maybe(inh.exp), syn)
+                    elseif inh.star == "}" then
+                        return re.triesTimes(inh.repeatStart, inh.repeatEnd, inh.exp, syn)
+                    elseif inh.star == "}?" then
+                        return re.triesTimesNonGreedy(inh.repeatStart, inh.repeatEnd, inh.exp, syn)
+                    elseif inh.star == "}+" then
+                        return re.con(re.times(inh.repeatStart, inh.repeatEnd, inh.exp), syn)
+                    else
+                        return re.con(inh.exp, syn)
+                    end
+                end
+
+                local function actionEnd(match, syn, inh)
+                    return actionCon(match, "", inh)
+                end
+                return re.con(star, re.choice(re.action(re.lookahead(re.choice("|", ")", re.isEnd())), actionEnd), re.action(con, actionCon)))
             end
 
-            local function actionLookahead(match, syn, inh)
-                return re.lookahead(syn)
+            local function createNaturalNumber()
+                local ch = re.range(0x30, 0x39)
+                local function actionNumber(match, syn, inh)
+                    local matchNum = utf8.codepoint(match, 1) - 0x30
+                    return inh * 10 + matchNum
+                end
+                return re.con(re.attr(0), re.oneOrMore(ch, actionNumber))
             end
+            local naturalNumber = createNaturalNumber()
 
-            local function actionLookaheadNot(match, syn, inh)
-                return re.lookaheadNot(syn)
-            end
-
-            local escExpChar1 = {
-                n = "\n",
-                r = "\r",
-                t = "\t"
-            }
-            escExpChar1["\\"] = re.wrap("\\")
-            local function matchEscChar1(match, lastIndex, attr)
-                local escCh = string.sub(match, lastIndex, lastIndex)
-                local escResult = escExpChar1[escCh]
-                if escResult == nil then
-                    return nil
-                else
+            local function rep(init, alt, con, star, element)
+                local function actionStar(match, syn, inh)
                     return {
-                        match = escCh,
-                        lastIndex = lastIndex + 1,
-                        attr = escResult
+                        star = syn.star,
+                        repeatStart = syn.repeatStart,
+                        repeatEnd = syn.repeatEnd,
+                        exp = inh
                     }
                 end
-            end
-            local otherChar = re.action(re.range(0, 0xffff), function(match, syn, inh) return match end)
-            local hexDigit = re.choice(re.range(0x30, 0x39), re.range(0x41, 0x46), re.range(0x61, 0x66))
-            local hexUnicode = re.con("u", re.action(re.con(hexDigit, hexDigit, hexDigit, hexDigit), actionHexDigit))
-            local anyChar = re.choice(re.con("\\", re.choice(matchEscChar1, hexUnicode, otherChar)), otherChar)
 
-            local escExp = {
-                d = re.range(0x30, 0x39),
-                D = re.con(re.lookaheadNot(re.range(0x30, 0x39)), re.range(0, 0xffff))
-            }
-            local function matchEsc(match, lastIndex, attr)
-                local escCh = string.sub(match, lastIndex, lastIndex)
-                local escResult = escExp[escCh]
-                if escResult == nil then
-                    return nil
-                else
+                local function actionRepeat(match, syn, inh)
                     return {
-                        match = escCh,
-                        lastIndex = lastIndex + 1,
-                        attr = escResult
+                        repeatStart = inh,
+                        repeatEnd = syn,
                     }
                 end
+
+                local function actionAtLeast(match, syn, inh)
+                    return {
+                        repeatStart = syn,
+                        repeatEnd = nil,
+                    }
+                end
+
+                local function actionTimes(match, syn, inh)
+                    return {
+                        repeatStart = syn,
+                        repeatEnd = syn,
+                    }
+                end
+
+                local function actionSpecifier(match, syn, inh)
+                    return {
+                        star = match,
+                        repeatStart = inh.repeatStart,
+                        repeatEnd = inh.repeatEnd
+                    }
+                end
+
+                local function actionRepeatStar(match, syn, inh)
+                    return {
+                        star = match
+                    }
+                end
+
+                local specifier = re.action(re.choice("}?", "}+", "}"), actionSpecifier)
+                local rep = re.con("{", naturalNumber, ",", re.action(naturalNumber, actionRepeat), specifier)
+                local atLeast = re.con("{", re.action(naturalNumber, actionAtLeast), ",", specifier)
+                local times = re.con("{", re.action(naturalNumber, actionTimes), specifier)
+                local star = re.action(re.choice("*?", "+?", "??", "*+", "++", "?+", "*", "+", "?", ""), actionRepeatStar)
+                local reps = re.choice(rep, atLeast, times, star)
+                return re.con(element, re.action(reps, actionStar))
             end
-            local refer = re.action(re.range(0x30, 0x39), actionRefer)
-            local bsSec = re.choice(matchEsc, refer)
-            local backslash = re.con("\\", bsSec)
 
-            local lookahead = re.action(re.con("(?=", alt, ")"), actionLookahead)
-            local lookaheadNot = re.action(re.con("(?!", alt, ")"), actionLookaheadNot)
-            local capture = re.action(re.con("(", alt, ")"), actionCapture)
-            local paren = re.choice(re.con("(?:", alt, ")"), lookahead, lookaheadNot, capture)
+            local function element(init, alt, con, star, element)
+                local function actionChar(match, syn, inh)
+                    return re.wrap(syn)
+                end
 
-            local chchset = re.con(re.lookaheadNot("]"), anyChar)
-            local chrange = re.con(chchset, "-", re.action(chchset, actionRange))
-            local ch1 = re.action(chchset, actionCh1)
-            local chelem = re.choice(chrange, ch1)
-            local chelems = re.con(re.attr(nil), re.oneOrMore(chelem, actionChElems))
-            local chcmpset = re.con("[^", re.action(chelems, actionChCmp), "]")
-            local chset = re.con("[", chelems, "]")
-            local anchorStart = re.action("^", function(match, syn, inh) return re.isStart() end)
-            local anchorEnd = re.action("$", function(match, syn, inh) return re.isEnd() end)
-            local dot = re.action(".", function(match, syn, inh) return re.con(re.lookaheadNot(re.choice("\r", "\n")), re.range(0, 0xffff)) end)
-            local elem = re.choice(chcmpset, chset, paren, backslash, anchorStart, anchorEnd, dot, re.action(anyChar, actionChar))
-            return re.con(re.lookaheadNot("|", ")"), elem)
+                local function actionRange(match, syn, inh)
+                    local codeStart = utf8.codepoint(inh, 1)
+                    local codeEnd = utf8.codepoint(syn, 1)
+                    return re.range(codeStart, codeEnd)
+                end
+
+                local function actionCh1(match, syn, inh)
+                    return re.wrap(syn)
+                end
+
+                local function actionChElems(match, syn, inh)
+                    if inh == nil then
+                        return syn
+                    else
+                        return re.choice(inh, syn)
+                    end
+                end
+
+                local function actionChCmp(match, syn, inh)
+                    return re.con(re.lookaheadNot(syn), re.range(0, 0xffff))
+                end
+
+                local function actionCapture(match, syn, inh)
+                    local function innerAction(match, syn, inh)
+                        local copy = {}
+                        for key, value in pairs(syn) do
+                            copy[key] = value
+                        end
+                        table.insert(copy, match)
+                        return copy
+                    end
+                    return re.action(syn, innerAction)
+                end
+
+                local function actionHexDigit(match, syn, inh)
+                    local codepoint = tonumber(match, 16)
+                    return utf8.char(codepoint)
+                end
+
+                local function actionRefer(match, syn, inh)
+                    local function matchCapture(matchInner, lastIndex, attr)
+                        local num = utf8.codepoint(match, 1) - 0x30
+                        if attr[num] == nil then
+                            error("uncaputured number")
+                        end
+                        return matchString(attr[num], matchInner, lastIndex, attr)
+                    end
+                    return matchCapture
+                end
+
+                local function actionAny(match, syn, inh)
+                    return re.wrap(match)
+                end
+
+                local function actionLookahead(match, syn, inh)
+                    return re.lookahead(syn)
+                end
+
+                local function actionLookaheadNot(match, syn, inh)
+                    return re.lookaheadNot(syn)
+                end
+
+                local escExpChar1 = {
+                    n = "\n",
+                    r = "\r",
+                    t = "\t"
+                }
+                escExpChar1["\\"] = re.wrap("\\")
+                local function matchEscChar1(match, lastIndex, attr)
+                    local escCh = string.sub(match, lastIndex, lastIndex)
+                    local escResult = escExpChar1[escCh]
+                    if escResult == nil then
+                        return nil
+                    else
+                        return {
+                            match = escCh,
+                            lastIndex = lastIndex + 1,
+                            attr = escResult
+                        }
+                    end
+                end
+                local otherChar = re.action(re.range(0, 0xffff), function(match, syn, inh) return match end)
+                local hexDigit = re.choice(re.range(0x30, 0x39), re.range(0x41, 0x46), re.range(0x61, 0x66))
+                local hexUnicode = re.con("u", re.action(re.con(hexDigit, hexDigit, hexDigit, hexDigit), actionHexDigit))
+                local anyChar = re.choice(re.con("\\", re.choice(matchEscChar1, hexUnicode, otherChar)), otherChar)
+
+                local escExp = {
+                    d = re.range(0x30, 0x39),
+                    D = re.con(re.lookaheadNot(re.range(0x30, 0x39)), re.range(0, 0xffff))
+                }
+                local function matchEsc(match, lastIndex, attr)
+                    local escCh = string.sub(match, lastIndex, lastIndex)
+                    local escResult = escExp[escCh]
+                    if escResult == nil then
+                        return nil
+                    else
+                        return {
+                            match = escCh,
+                            lastIndex = lastIndex + 1,
+                            attr = escResult
+                        }
+                    end
+                end
+                local refer = re.action(re.range(0x30, 0x39), actionRefer)
+                local bsSec = re.choice(matchEsc, refer)
+                local backslash = re.con("\\", bsSec)
+
+                local lookahead = re.action(re.con("(?=", alt, ")"), actionLookahead)
+                local lookaheadNot = re.action(re.con("(?!", alt, ")"), actionLookaheadNot)
+                local capture = re.action(re.con("(", alt, ")"), actionCapture)
+                local paren = re.choice(re.con("(?:", alt, ")"), lookahead, lookaheadNot, capture)
+
+                local chchset = re.con(re.lookaheadNot("]"), anyChar)
+                local chrange = re.con(chchset, "-", re.action(chchset, actionRange))
+                local ch1 = re.action(chchset, actionCh1)
+                local chelem = re.choice(chrange, ch1)
+                local chelems = re.con(re.attr(nil), re.oneOrMore(chelem, actionChElems))
+                local chcmpset = re.con("[^", re.action(chelems, actionChCmp), "]")
+                local chset = re.con("[", chelems, "]")
+                local anchorStart = re.action("^", function(match, syn, inh) return re.isStart() end)
+                local anchorEnd = re.action("$", function(match, syn, inh) return re.isEnd() end)
+                local dot = re.action(".", function(match, syn, inh) return re.con(re.lookaheadNot(re.choice("\r", "\n")), re.range(0, 0xffff)) end)
+                local elem = re.choice(chcmpset, chset, paren, backslash, anchorStart, anchorEnd, dot, re.action(anyChar, actionChar))
+                return re.con(re.lookaheadNot("|", ")"), elem)
+            end
+
+            local parser = re.letrec(init, alter, concat, rep, element)
+            return parser
         end
 
-        local parser = re.letrec(init, alter, concat, rep, element)
-        return parser
-    end
+        local regexParser = createRegexParser()
+        local regexParserMax = createRegexParser("M")
 
-    local regexParser = createRegexParser()
-    local regexParserMax = createRegexParser("M")
-
-    function me.regex(pattern, flags)
-        local result
-        if flags == "M" then
-            result = regexParserMax(pattern, 1, nil)
-        else
-            result = regexParser(pattern, 1, nil)
-        end
-        if result then
-            return result.attr
-        else
-            return nil
-        end
-    end
-
-    local function matchPos(matcher, dest, position)
-        while position <= string.len(dest) do
-            local result = matcher(dest, position, nil)
+        function me.regex(pattern, flags)
+            local result
+            if flags == "M" then
+                result = regexParserMax(pattern, 1, nil)
+            else
+                result = regexParser(pattern, 1, nil)
+            end
             if result then
-                result.attr[0] = result.match
-                result.attr.lastIndex = result.lastIndex - 1
-                result.attr.index = position
                 return result.attr
             else
-                position = position + 1
+                return nil
             end
         end
-        return nil
+
+        return me
     end
 
-    function me.global(pattern, flags)
-        local matcher = me.regex(pattern, flags)
+    local regexEngine = Regex(me)
 
-        local function matchFirst(dest)
-            local position = 1
-            local function matchNext()
-                local result = matchPos(matcher, dest, position)
-                if result then
-                    position = result.lastIndex
-                end
-                return result
-            end
-            return matchNext
-        end
-        return matchFirst
-    end
-
-    function me.matcher(pattern, flags)
-        local matcher = me.regex(pattern, flags)
-
-        local function matchFirst(dest)
-            return matchPos(matcher, dest, 1)
-        end
-        return matchFirst
-    end
-
-    function me.split(pattern, flags)
-        local matcher = me.global(pattern, flags)
-
-        local function splitString(dest)
-            local matchNext = matcher(dest)
-            local splitted = {}
-            local indexBefore = 1
-            while true do
-                local result = matchNext()
-                if result then
-                    table.insert(splitted, string.sub(dest, indexBefore, result.index - 1))
-                else
-                    table.insert(splitted, string.sub(dest, indexBefore, string.len(dest)))
-                    return splitted
-                end
-                indexBefore = result.lastIndex + 1
-            end
-        end
-        return splitString
+    function me.regex(pattern)
+        return regexEngine.regex(pattern)
     end
 
     return me
