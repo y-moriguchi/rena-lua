@@ -1,3 +1,6 @@
+--
+-- This source code is under the Unlicense
+--
 require 'busted.runner'()
 require("rena")
 
