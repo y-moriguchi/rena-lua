@@ -244,17 +244,19 @@ function Rena(option)
 
     function me.letrec(...)
         local args = {...}
-        local function f(g) return g(g) end
-        local function h(p)
-            local res = {}
-            for i = 1, #args do
-                res[i] = function(match, lastIndex, attr)
-                    return (args[i](table.unpack(p(p))))(match, lastIndex, attr)
+        local delays = {}
+        local memo = {}
+        for i = 1, #args do
+            (function(i)
+                delays[i] = function(match, lastIndex, attr)
+                    if not memo[i] then
+                        memo[i] = args[i](table.unpack(delays))
+                    end
+                    return memo[i](match, lastIndex, attr)
                 end
-            end
-            return res
+            end)(i)
         end
-        return (f(h))[1]
+        return delays[1]
     end
 
     local keys = nil
